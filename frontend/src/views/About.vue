@@ -57,34 +57,6 @@
         </div>
       </div>
     </el-card>
-
-    <!-- 开发人员 -->
-    <el-card shadow="never" class="about-card">
-      <template #header>
-        <span class="card-title">开发人员</span>
-      </template>
-      <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="项目类型">软件工程课程设计</el-descriptions-item>
-        <el-descriptions-item label="开发语言">JavaScript (ES6+)</el-descriptions-item>
-        <el-descriptions-item label="框架版本">Vue 3.x (Composition API)</el-descriptions-item>
-        <el-descriptions-item label="构建工具">Vite 5.x</el-descriptions-item>
-        <el-descriptions-item label="UI 框架">Element Plus 2.x</el-descriptions-item>
-        <el-descriptions-item label="代码规范">ESLint + Scoped CSS</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <!-- 课程信息 -->
-    <el-card shadow="never" class="about-card">
-      <template #header>
-        <span class="card-title">课程信息</span>
-      </template>
-      <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="课程名称"><el-input placeholder="软件工程" /></el-descriptions-item>
-        <el-descriptions-item label="指导教师"><el-input placeholder="待填写" /></el-descriptions-item>
-        <el-descriptions-item label="学期"><el-input placeholder="2025-2026 学年" /></el-descriptions-item>
-        <el-descriptions-item label="提交日期"><el-input placeholder="待填写" /></el-descriptions-item>
-      </el-descriptions>
-    </el-card>
   </div>
 </template>
 
