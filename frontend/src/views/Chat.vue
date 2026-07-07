@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { sendMessage } from '@/api/chat.js'
 import ChatBox from '@/components/ChatBox.vue'
@@ -75,12 +75,11 @@ async function handleSend(text) {
   currentStep.value = -1
   toolCalls.value = []
 
-  // 添加 AI 占位消息
   addMessage('assistant', '正在分析你的问题...', true)
 
   try {
     const result = await sendMessage(text)
-    
+
     agentSteps.value = result.steps || []
     currentStep.value = result.steps ? result.steps.length - 1 : -1
     toolCalls.value = result.tools || []
@@ -117,15 +116,16 @@ function clearMessages() {
 .chat-page {
   display: flex;
   height: 100%;
+  overflow: hidden;
 }
 
-/* 左侧聊天区 */
 .chat-left {
-  flex:1;
+  flex: 1;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-color);
-  min-width: 0;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .chat-bottom {
@@ -136,15 +136,17 @@ function clearMessages() {
   padding: 4px 20px;
   background: #fefce8;
   border-top: 1px solid #fde68a;
+  flex-shrink: 0;
 }
 
-/* 右侧面板 */
 .chat-right {
   width: 340px;
   flex-shrink: 0;
-  padding: 16px;
-  overflow-y: auto;
   background: var(--bg-secondary);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (max-width: 1024px) {

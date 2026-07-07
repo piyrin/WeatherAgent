@@ -21,7 +21,7 @@ backend/
 │   ├── core/                     # 基础设施层
 │   │   ├── config.py             # Pydantic Settings 配置中心
 │   │   ├── database.py           # SQLAlchemy 引擎 & 会话 & Base
-│   │   └── security.py           # API Key 校验（JWT 预留）
+│   │   └── security.py           # 预留（已删除）
 │   ├── models/                   # 数据层（ORM）
 │   │   ├── base.py               # BaseModel + TimestampMixin
 │   │   ├── conversation.py       # 会话表

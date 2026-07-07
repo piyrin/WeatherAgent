@@ -13,10 +13,10 @@ LLM + Tool Calling 核心模块
 """
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
 from app.utils.logger import logger
@@ -25,25 +25,6 @@ from app.utils.logger import logger
 # =============================================================================
 # LLM 工厂 — 根据配置创建对应 Provider 的 ChatModel
 # =============================================================================
-
-
-def _create_zhipuai_chat_model() -> BaseChatModel:
-    try:
-        from langchain_community.chat_models import ChatZhipuAI
-        return ChatZhipuAI(
-            model=settings.LLM_MODEL,
-            api_key=settings.LLM_API_KEY,
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS,
-            base_url=settings.LLM_BASE_URL,
-        )
-    except ImportError:
-        logger.error("未安装 langchain-community，回退到 OpenAI 兼容接口")
-        return _create_openai_compatible_chat_model()
-    except Exception as e:
-        logger.error(f"创建 ZhipuAI 模型失败: {e}，回退到 OpenAI 兼容接口")
-        return _create_openai_compatible_chat_model()
-
 
 def _create_openai_compatible_chat_model() -> BaseChatModel:
     from langchain_openai import ChatOpenAI
@@ -70,7 +51,6 @@ def _create_anthropic_compatible_chat_model() -> BaseChatModel:
 
 
 _PROVIDER_FACTORY = {
-    "zhipuai": _create_zhipuai_chat_model,
     "openai": _create_openai_compatible_chat_model,
     "qwen": _create_openai_compatible_chat_model,
     "deepseek": _create_anthropic_compatible_chat_model,
@@ -78,23 +58,24 @@ _PROVIDER_FACTORY = {
 }
 
 
+_llm_instance: BaseChatModel | None = None
+
+
 def create_llm() -> BaseChatModel:
+    global _llm_instance
+    if _llm_instance is not None:
+        return _llm_instance
+
     provider = settings.LLM_PROVIDER.lower()
     factory = _PROVIDER_FACTORY.get(provider)
 
     if factory is None:
-        logger.warning(
-            f"未知的 LLM Provider: {provider}，"
-            f"默认使用 OpenAI 兼容接口（base_url={settings.LLM_BASE_URL}）"
-        )
+        logger.warning(f"未知的 LLM Provider: {provider}，使用 OpenAI 兼容接口")
         factory = _create_openai_compatible_chat_model
 
-    llm = factory()
-    logger.info(
-        f"LLM 创建成功 | provider={provider} | "
-        f"model={settings.LLM_MODEL} | temperature={settings.LLM_TEMPERATURE}"
-    )
-    return llm
+    _llm_instance = factory()
+    logger.info(f"LLM 初始化完成 | provider={provider} | model={settings.LLM_MODEL}")
+    return _llm_instance
 
 
 # =============================================================================
@@ -243,17 +224,13 @@ def generate_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     })
 
     content = response.content.strip()
-    print(f"[DEBUG] LLM 返回内容: {content[:2000]}")
 
     try:
         plan = json.loads(content)
-        print(f"[DEBUG] Plan JSON 解析成功: {json.dumps(plan, ensure_ascii=False)[:500]}")
-    except json.JSONDecodeError as e:
-        print(f"[DEBUG] Plan JSON 解析失败 | 错误: {e} | 原始内容: {content[:1000]}")
+    except json.JSONDecodeError:
         plan = _create_fallback_plan(state["user_message"])
 
     if not isinstance(plan, dict) or "plan" not in plan:
-        print(f"[DEBUG] Plan 格式不正确 | plan字段缺失或类型错误: {type(plan)}")
         plan = _create_fallback_plan(state["user_message"])
 
     logger.info(f"Plan 生成成功 | intent_category={plan.get('intent_category')} | total_steps={plan.get('total_steps')}")

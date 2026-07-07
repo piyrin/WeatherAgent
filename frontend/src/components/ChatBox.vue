@@ -77,6 +77,7 @@ watch(() => props.messages, scrollToBottom, { deep: true })
 .chat-box {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
 }
 
