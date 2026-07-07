@@ -14,12 +14,6 @@ const routes = [
     meta: { title: '智能聊天 - 天气与出行助手' }
   },
   {
-    path: '/history',
-    name: 'History',
-    component: () => import('@/views/History.vue'),
-    meta: { title: '历史记录 - 天气与出行助手' }
-  },
-  {
     path: '/about',
     name: 'About',
     component: () => import('@/views/About.vue'),

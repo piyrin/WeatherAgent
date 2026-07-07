@@ -48,6 +48,10 @@ const props = defineProps({
   messages: {
     type: Array,
     default: () => []
+  },
+  autoScroll: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -64,20 +68,31 @@ const examples = [
 ]
 
 function scrollToBottom() {
+  if (!props.autoScroll) return
   nextTick(() => {
     scrollAnchor.value?.scrollIntoView({ behavior: 'smooth' })
   })
 }
 
+function scrollToTop() {
+  nextTick(() => {
+    chatContainer.value?.scrollTo({ top: 0, behavior: 'instant' })
+  })
+}
+
 watch(() => props.messages.length, scrollToBottom)
 watch(() => props.messages, scrollToBottom, { deep: true })
+
+defineExpose({ scrollToTop })
 </script>
 
 <style scoped>
 .chat-box {
-  flex: 1;
+  flex: 1 1 0;
   overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
+  min-height: 0;
 }
 
 /* 空状态 */
@@ -86,7 +101,7 @@ watch(() => props.messages, scrollToBottom, { deep: true })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 100%;
   padding: 40px 20px;
 }
 
@@ -140,7 +155,7 @@ watch(() => props.messages, scrollToBottom, { deep: true })
 
 /* 消息区域 */
 .chat-messages {
-  min-height: 100%;
+  padding-bottom: 8px;
 }
 
 .chat-actions {

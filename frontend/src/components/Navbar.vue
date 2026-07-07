@@ -20,18 +20,11 @@
           <el-icon><ChatDotRound /></el-icon>
           <span>智能聊天</span>
         </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><Clock /></el-icon>
-          <span>历史记录</span>
-        </el-menu-item>
         <el-menu-item index="/about">
           <el-icon><InfoFilled /></el-icon>
           <span>关于</span>
         </el-menu-item>
       </el-menu>
-    </div>
-    <div class="navbar-right">
-      <el-tag type="info" effect="plain" size="small">LangChain Agent</el-tag>
     </div>
   </div>
 </template>
@@ -44,7 +37,6 @@ const route = useRoute()
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/chat')) return '/chat'
-  if (route.path.startsWith('/history')) return '/history'
   if (route.path.startsWith('/about')) return '/about'
   return '/'
 })
@@ -106,11 +98,6 @@ const activeMenu = computed(() => {
   height: 60px;
   line-height: 60px;
   font-size: 14px;
-}
-
-.navbar-right {
-  display: flex;
-  align-items: center;
 }
 
 @media (max-width: 768px) {

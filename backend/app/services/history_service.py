@@ -72,6 +72,23 @@ class HistoryService(BaseService):
 
         result = []
         for conv in conversations:
+            # 获取第一条用户消息（用于侧边栏展示）
+            first_user_msg = (
+                self.db.query(Message)
+                .filter(Message.conversation_id == conv.id, Message.role == "user")
+                .order_by(Message.created_at.asc())
+                .first()
+            )
+
+            first_user_preview = None
+            if first_user_msg:
+                content = first_user_msg.content or ""
+                first_user_preview = (
+                    content[:self._PREVIEW_MAX_LENGTH] + "..."
+                    if len(content) > self._PREVIEW_MAX_LENGTH
+                    else content
+                )
+
             # 获取最后一条消息预览
             last_msg = (
                 self.db.query(Message)
@@ -93,6 +110,7 @@ class HistoryService(BaseService):
                 "id": conv.id,
                 "title": conv.title,
                 "message_count": conv.message_count,
+                "first_user_message": first_user_preview,
                 "last_message": last_preview,
                 "created_at": conv.created_at.isoformat() if conv.created_at else "",
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else "",

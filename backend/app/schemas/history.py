@@ -61,6 +61,7 @@ class ConversationListItem(BaseModel):
     id: str = Field(..., description="会话 ID")
     title: str = Field(..., description="会话标题")
     message_count: int = Field(default=0, description="消息总数")
+    first_user_message: Optional[str] = Field(default=None, description="第一条用户消息预览（用于侧边栏展示）")
     last_message: Optional[str] = Field(default=None, description="最后一条消息预览")
     created_at: str = Field(..., description="创建时间（ISO 8601）")
     updated_at: str = Field(..., description="最后活跃时间（ISO 8601）")
