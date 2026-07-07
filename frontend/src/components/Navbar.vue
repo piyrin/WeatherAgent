@@ -18,11 +18,7 @@
       >
         <el-menu-item index="/chat">
           <el-icon><ChatDotRound /></el-icon>
-          <span>智能聊天</span>
-        </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><Clock /></el-icon>
-          <span>历史记录</span>
+          <span>聊天</span>
         </el-menu-item>
         <el-menu-item index="/about">
           <el-icon><InfoFilled /></el-icon>
@@ -44,7 +40,6 @@ const route = useRoute()
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/chat')) return '/chat'
-  if (route.path.startsWith('/history')) return '/history'
   if (route.path.startsWith('/about')) return '/about'
   return '/'
 })

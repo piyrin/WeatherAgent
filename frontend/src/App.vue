@@ -19,7 +19,7 @@ import Navbar from '@/components/Navbar.vue'
 import Sidebar from '@/components/Sidebar.vue'
 
 const route = useRoute()
-const showSidebar = computed(() => route.name !== 'Home')
+const showSidebar = computed(() => route.name === 'Chat')
 </script>
 
 <style>

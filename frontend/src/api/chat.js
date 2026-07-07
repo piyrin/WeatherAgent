@@ -58,8 +58,9 @@ import request from './request.js'
 /**
  * 发送聊天消息
  * @param {string} message - 用户输入的自然语言文本
- * @returns {Promise<{answer: string, steps: Array, tools: Array}>}
+ * @param {string|null} conversationId - 会话 ID（null 则创建新会话）
+ * @returns {Promise<{answer: string, steps: Array, tools: Array, conversation_id: string}>}
  */
-export function sendMessage(message) {
-  return request.post('/v1/chat', { message })
+export function sendMessage(message, conversationId = null) {
+  return request.post('/v1/chat', { message, conversation_id: conversationId })
 }

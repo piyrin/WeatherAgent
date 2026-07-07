@@ -31,20 +31,26 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { sendMessage } from '@/api/chat.js'
+import { getConversationDetail } from '@/api/history.js'
 import ChatBox from '@/components/ChatBox.vue'
 import InputPanel from '@/components/InputPanel.vue'
 import StepTimeline from '@/components/StepTimeline.vue'
 import ToolPanel from '@/components/ToolPanel.vue'
 import Loading from '@/components/Loading.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 const messages = ref([])
 const isLoading = ref(false)
 const agentSteps = ref([])
 const currentStep = ref(-1)
 const toolCalls = ref([])
+const currentConversationId = ref(null)
 
 let messageId = 0
 
@@ -78,7 +84,14 @@ async function handleSend(text) {
   addMessage('assistant', '正在分析你的问题...', true)
 
   try {
-    const result = await sendMessage(text)
+    const result = await sendMessage(text, currentConversationId.value)
+
+    // 首次对话时后端返回新的 conversation_id，保存下来
+    if (result.conversation_id && !currentConversationId.value) {
+      currentConversationId.value = result.conversation_id
+      // 同步到 URL query，使侧边栏高亮当前会话
+      router.replace({ path: '/chat', query: { conversation_id: result.conversation_id } })
+    }
 
     agentSteps.value = result.steps || []
     currentStep.value = result.steps ? result.steps.length - 1 : -1
@@ -108,8 +121,53 @@ function clearMessages() {
   toolCalls.value = []
   currentStep.value = -1
   messageId = 0
+  currentConversationId.value = null
+  if (route.query.conversation_id) {
+    router.push('/chat')
+  }
   ElMessage.success('已清空对话')
 }
+
+// 从路由 query 加载历史会话
+async function loadConversation(conversationId) {
+  if (!conversationId) return
+  try {
+    const detail = await getConversationDetail(conversationId)
+    if (detail && detail.messages) {
+      messages.value = detail.messages.map(msg => ({
+        id: ++messageId,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.created_at,
+        isStreaming: false,
+      }))
+      currentConversationId.value = conversationId
+    }
+  } catch {
+    ElMessage.warning('加载历史会话失败')
+    router.push('/chat')
+  }
+}
+
+// 监听路由 query 变化
+watch(
+  () => route.query.conversation_id,
+  (newId) => {
+    if (newId && newId !== currentConversationId.value) {
+      loadConversation(newId)
+    } else if (!newId && currentConversationId.value) {
+      // 切换到新对话
+      clearMessages()
+    }
+  }
+)
+
+onMounted(() => {
+  const convId = route.query.conversation_id
+  if (convId) {
+    loadConversation(convId)
+  }
+})
 </script>
 
 <style scoped>

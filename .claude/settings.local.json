@@ -3,7 +3,8 @@
     "allow": [
       "Bash(curl *)",
       "Bash(python *)",
-      "Bash(grep -E \"\\\\.env$\")"
+      "Bash(grep -E \"\\\\.env$\")",
+      "Bash(npx vite *)"
     ]
   }
 }

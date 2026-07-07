@@ -25,6 +25,15 @@ export function deleteHistory(id) {
 }
 
 /**
+ * 获取会话详情（含完整消息列表）
+ * @param {string} id - 会话 ID
+ * @returns {Promise<{id: string, title: string, messages: Array, created_at: string, updated_at: string}>}
+ */
+export function getConversationDetail(id) {
+  return request.get(`/v1/history/${id}`)
+}
+
+/**
  * 清空全部历史记录
  */
 export function clearHistory() {
