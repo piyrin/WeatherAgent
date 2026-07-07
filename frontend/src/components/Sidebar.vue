@@ -21,7 +21,7 @@
     </el-menu>
 
     <div class="sidebar-footer">
-      <div class="status-dot"></div>
+      <div class="status-dot" :class="{ 'is-disconnected': backendStatus !== '已连接' }"></div>
       <span class="status-text">后端服务：{{ backendStatus }}</span>
     </div>
   </div>
@@ -96,6 +96,10 @@ onMounted(async () => {
   border-radius: 50%;
   background: var(--success-color);
   flex-shrink: 0;
+}
+
+.status-dot.is-disconnected {
+  background: var(--error-color);
 }
 
 .status-text {
