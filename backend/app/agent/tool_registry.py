@@ -26,6 +26,7 @@ from app.tools.weather import WeatherTool
 from app.tools.date_parser import DateParserTool
 from app.tools.route_planner import RoutePlannerTool
 from app.tools.calculator import CalculatorTool
+from app.tools.city_resolver import CityResolverTool
 from app.utils.logger import logger
 
 
@@ -138,6 +139,7 @@ def _register_all():
     # 核心工具
     tool_registry.register(WeatherTool())
     tool_registry.register(DateParserTool())
+    tool_registry.register(CityResolverTool())
     tool_registry.register(RoutePlannerTool())
     tool_registry.register(CalculatorTool())
 

@@ -146,30 +146,97 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # 天气 API 配置（供 weather.py Tool 使用）
+    # 高德开放平台（AMAP）配置 — 天气 / 路线 / 地理编码 / POI / 距离 等所有服务共用
     # =========================================================================
+    # 设计原则：
+    #   1. 高德开放平台的所有服务（天气查询、路线规划、地理编码、POI搜索等）
+    #      共用一个 AMAP_API_KEY，不维护多个重复 Key。
+    #   2. WEATHER_PROVIDER / MAP_PROVIDER 保留，支持未来切换其他平台
+    #      （如 OpenWeather、腾讯地图、百度地图），但当前默认均为 amap。
+    #   3. 通过 get_provider_api_key() 预留下游 Tool 独立 API Key 的扩展能力，
+    #      当前实现直接返回 AMAP_API_KEY，无需修改任何 Tool。
+
+    AMAP_API_KEY: str = Field(
+        default="",
+        description="高德开放平台 API Key（天气、地图、路线、地理编码等服务共用）",
+    )
+    AMAP_BASE_URL: str = Field(
+        default="https://restapi.amap.com",
+        description="高德开放平台 API 基础地址",
+    )
+
+    @property
+    def AMAP_WEATHER_URL(self) -> str:
+        """高德天气 API 完整 URL（基于 AMAP_BASE_URL 拼接）"""
+        return f"{self.AMAP_BASE_URL}/v3/weather/weatherInfo"
 
     WEATHER_PROVIDER: str = Field(
-        default="openweathermap",
-        description="天气数据提供商",
+        default="amap",
+        description="天气数据提供商（当前: amap，预留: openweathermap）",
     )
-    WEATHER_API_KEY: str = Field(
-        default="",
-        description="天气 API 密钥",
-    )
-
-    # =========================================================================
-    # 地图/路线 API 配置（供 route_planner.py Tool 使用）
-    # =========================================================================
 
     MAP_PROVIDER: str = Field(
         default="amap",
-        description="地图服务提供商",
+        description="地图/路线服务提供商（当前: amap，预留: tencent / baidu）",
     )
-    MAP_API_KEY: str = Field(
-        default="",
-        description="地图 API 密钥",
-    )
+
+    # ---- 向后兼容别名（已废弃，请直接用 AMAP_API_KEY） ----
+
+    @property
+    def WEATHER_API_KEY(self) -> str:
+        """【已废弃】请使用 AMAP_API_KEY"""
+        return self.AMAP_API_KEY
+
+    @property
+    def MAP_API_KEY(self) -> str:
+        """【已废弃】请使用 AMAP_API_KEY"""
+        return self.AMAP_API_KEY
+
+    @property
+    def WEATHER_BASE_URL(self) -> str:
+        """【已废弃】请使用 AMAP_BASE_URL"""
+        return self.AMAP_BASE_URL
+
+    @property
+    def MAP_BASE_URL(self) -> str:
+        """【已废弃】请使用 AMAP_BASE_URL"""
+        return self.AMAP_BASE_URL
+
+    # ---- Provider API Key 扩展点 ----
+
+    def get_provider_api_key(self, provider: str) -> str:
+        """
+        根据 Provider 返回对应的 API Key（预留未来多 Provider 支持）
+
+        当前实现：所有高德相关服务返回 AMAP_API_KEY。
+        未来扩展：可在此方法中根据 provider 返回不同 Key。
+
+        参数：
+            provider: 服务提供商（"amap" / "openweathermap" / "tencent" / "baidu"）
+
+        返回值：
+            对应的 API Key
+
+        示例：
+            key = settings.get_provider_api_key("amap")  # → AMAP_API_KEY
+            key = settings.get_provider_api_key("openweathermap")  # → OPENWEATHER_API_KEY (未来)
+        """
+        provider_key_map = {
+            "amap": self.AMAP_API_KEY,
+            # 未来扩展示例：
+            # "openweathermap": self.OPENWEATHER_API_KEY,
+            # "tencent": self.TENCENT_MAP_API_KEY,
+            # "baidu": self.BAIDU_MAP_API_KEY,
+        }
+        key = provider_key_map.get(provider, "")
+        if not key:
+            logger = __import__("app.utils.logger", fromlist=["logger"]).logger
+            logger.warning(
+                f"[config] Provider '{provider}' 的 API Key 未配置，"
+                f"使用 AMAP_API_KEY 作为默认值"
+            )
+            return self.AMAP_API_KEY
+        return key
 
     # =========================================================================
     # 安全配置

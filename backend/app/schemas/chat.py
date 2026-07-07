@@ -16,7 +16,7 @@ Agent 核心设计：
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -78,14 +78,14 @@ class ToolCallRecord(BaseModel):
     字段说明：
       - tool_name:   工具名称（如 "weather", "route_planner"）
       - tool_input:  工具输入参数
-      - tool_output: 工具输出文本（可读的摘要）
+      - tool_output: 工具输出（结构化 JSON 或文本）
       - status:      调用状态（success / error）
       - duration_ms: 调用耗时（毫秒）
     """
 
     tool_name: str = Field(..., description="工具名称")
     tool_input: Optional[dict] = Field(default=None, description="工具输入参数")
-    tool_output: Optional[str] = Field(default=None, description="工具输出摘要")
+    tool_output: Optional[Any] = Field(default=None, description="工具输出")
     status: str = Field(default="success", description="调用状态")
     duration_ms: Optional[float] = Field(default=None, description="调用耗时（毫秒）")
 

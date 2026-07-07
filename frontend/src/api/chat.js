@@ -60,6 +60,49 @@ import request from './request.js'
  * @param {string} message - 用户输入的自然语言文本
  * @returns {Promise<{answer: string, steps: Array, tools: Array}>}
  */
-export function sendMessage(message) {
-  return request.post('/v1/chat', { message })
+export async function sendMessage(message, conversationId = null) {
+  const response = await request.post('/v1/chat', {
+    message,
+    conversation_id: conversationId
+  })
+  return normalizeChatResponse(response)
+}
+
+function normalizeChatResponse(response) {
+  const payload = response?.data || response || {}
+  const agentProcess = payload.agent_process || {}
+
+  return {
+    answer: payload.message || '',
+    conversationId: payload.conversation_id || null,
+    messageId: payload.message_id || null,
+    createdAt: payload.created_at || null,
+    steps: agentProcess.steps || [],
+    tools: normalizeToolCalls(agentProcess.tool_calls || [])
+  }
+}
+
+function normalizeToolCalls(toolCalls) {
+  return toolCalls.map((tool) => ({
+    name: tool.tool_name || tool.name || 'Tool',
+    input: tool.tool_input || tool.input || null,
+    output: parseToolOutput(tool.tool_output || tool.output || null),
+    status: normalizeStatus(tool.status),
+    durationMs: tool.duration_ms || null
+  }))
+}
+
+function normalizeStatus(status) {
+  if (status === 'success') return 'completed'
+  if (status === 'error') return 'failed'
+  return status || 'completed'
+}
+
+function parseToolOutput(output) {
+  if (typeof output !== 'string') return output
+  try {
+    return JSON.parse(output.replaceAll("'", '"'))
+  } catch (error) {
+    return output
+  }
 }

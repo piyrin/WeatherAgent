@@ -9,6 +9,7 @@
 
 from app.models.base import BaseModel, TimestampMixin
 from app.models.conversation import Conversation
+from app.models.conversation_summary import ConversationSummary
 from app.models.message import Message
 from app.models.tool_call_log import ToolCallLog
 
@@ -17,6 +18,7 @@ __all__ = [
     "BaseModel",
     "TimestampMixin",
     "Conversation",
+    "ConversationSummary",
     "Message",
     "ToolCallLog",
 ]

@@ -8,26 +8,32 @@
   3. 调用 Agent 执行器处理用户输入
   4. 记录工具调用日志
   5. 组装 ChatResponse 返回给前端
+  6. 使用 ChatMemory 管理对话上下文（摘要 + Token 预算）
 
 Agent 核心流程：
   用户输入 → 创建/查找会话 → 保存用户消息
+  → ChatMemory 加载上下文（摘要 + 最近消息 + Token 预算截断）
   → Agent 执行（理解→计划→调用工具→生成回答）
   → 保存助手消息 → 保存工具调用日志 → 返回结果
+  → ChatMemory 检查并生成摘要（消息超过阈值时）
 
 设计原则：
   - 事务边界：整个 chat 流程在一个 DB 事务中完成
   - Agent 调用与数据库操作分离：Agent 先执行，结果再持久化
   - 工具调用日志批量写入：减少数据库 IO
+  - Memory 管理独立：ChatMemory 封装上下文加载和摘要逻辑
 =============================================================================
 """
 
 import uuid
 from datetime import datetime, timezone
+from pprint import pformat
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.agent.executor import AgentResult, get_agent_executor
+from app.memory.chat_memory import ChatMemory
 from app.middleware.exception_handler import AppException
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -91,17 +97,28 @@ class ChatService(BaseService):
         self.db.flush()  # 确保 user_msg 获得 ID（后续 ToolCallLog 需要）
 
         # =====================================================================
-        # Step 3: 构建对话历史（给 Agent 的上下文）
+        # Step 3: 构建对话记忆上下文
         # =====================================================================
-        chat_history = self._build_chat_history(conversation.id)
+        # ChatMemory 负责：
+        #   - 加载对话历史（含摘要 + 最近消息）
+        #   - 按 Token 预算智能截断（不再硬编码"最近 6 条"）
+        #   - 格式化上下文为预处理的纯文本字符串
+        memory = ChatMemory(
+            db=self.db,
+            conversation_id=conversation.id,
+            llm=self._get_llm(),
+        )
+        memory_context = memory.load_memory_context()
 
         # =====================================================================
         # Step 4: 调用 Agent 执行
         # =====================================================================
+        # 传入预格式化的上下文字符串（而非 LangChain 消息列表）
+        # AgentExecutor 直接使用此字符串注入 AgentState.chat_history
         executor = get_agent_executor()
         agent_result: AgentResult = await executor.run(
             user_input=message,
-            chat_history=chat_history,
+            chat_history=memory_context,
         )
 
         # =====================================================================
@@ -139,6 +156,19 @@ class ChatService(BaseService):
         # Step 8: 提交事务
         # =====================================================================
         self.db.commit()
+
+        # =====================================================================
+        # Step 8.5: 检查并生成对话摘要（非阻塞，消息超过阈值时触发）
+        # =====================================================================
+        # maybe_summarize 在提交后调用，此时新一轮消息已持久化
+        # 如果消息总数超过阈值，调用 LLM 生成摘要并存储到 conversation_summaries 表
+        try:
+            summary = memory.maybe_summarize()
+            if summary:
+                self.db.commit()  # 提交摘要写入
+        except Exception as summary_err:
+            # 摘要生成失败不影响主流程
+            logger.warning(f"摘要生成失败（不影响主流程）| error={summary_err}")
 
         # =====================================================================
         # Step 9: 组装响应
@@ -187,35 +217,23 @@ class ChatService(BaseService):
         logger.info(f"创建新会话 | id={conv.id}")
         return conv
 
-    def _build_chat_history(self, conversation_id: str) -> list:
+    # ---- LLM 懒加载（类级别单例，所有 ChatService 实例共享） ----
+
+    _llm = None
+
+    @classmethod
+    def _get_llm(cls):
         """
-        从数据库加载对话历史，构建 LangChain 消息列表
+        获取 LLM 实例（懒加载，只创建一次）
 
-        参数：
-            conversation_id: 会话 ID
-
-        返回值：
-            LangChain 消息列表（HumanMessage + AIMessage）
+        ChatMemory 需要 LLM 来生成对话摘要。
+        使用类级别单例避免每次请求都创建新的 LLM 连接。
         """
-        messages = (
-            self.db.query(Message)
-            .filter(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
-            .all()
-        )
-
-        from langchain_core.messages import AIMessage as LCAIMessage
-        from langchain_core.messages import HumanMessage as LCHumanMessage
-
-        history = []
-        for msg in messages:
-            if msg.role == "user":
-                history.append(LCHumanMessage(content=msg.content))
-            elif msg.role == "assistant":
-                history.append(LCAIMessage(content=msg.content))
-            # system 和 tool 角色的消息暂不加入历史（避免干扰 Agent）
-
-        return history
+        if cls._llm is None:
+            from app.agent.agent import create_llm
+            cls._llm = create_llm()
+            logger.info("ChatService: LLM 懒加载完成（用于摘要生成）")
+        return cls._llm
 
     def _save_tool_call_logs(
         self,
@@ -230,12 +248,16 @@ class ChatService(BaseService):
             agent_result: Agent 执行结果
         """
         for step in agent_result.tool_calls:
+            output_json = step.tool_output if isinstance(step.tool_output, dict) else None
             log = ToolCallLog(
                 id=str(uuid.uuid4()),
                 message_id=message_id,
                 tool_name=step.tool_name,
                 tool_input_json=step.tool_input,
-                tool_output_text=step.tool_output,
+                tool_output_json=output_json,
+                tool_output_text=pformat(step.tool_output, width=120)
+                if step.tool_output is not None
+                else None,
                 status=step.status,
                 duration_ms=step.duration_ms,
             )

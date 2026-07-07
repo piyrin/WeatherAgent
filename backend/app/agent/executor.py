@@ -1,61 +1,55 @@
 """
 =============================================================================
-Agent 执行器 — 编排 理解→计划→调用→观察→回答 全流程
+AgentExecutor — LangGraph Agent 的执行器（替换旧版）
 =============================================================================
 职责：
-  1. 接收用户输入，调用 LangChain Agent 执行
-  2. 提取 Agent 执行过程（工具调用、思考步骤）
-  3. 将执行结果封装为结构化的 AgentResult
-  4. 提供执行过程的可视化数据（给前端 Agent 过程面板使用）
+  1. 管理 LangGraph Agent 的生命周期
+  2. 接收 ChatService 调用，初始化 AgentState，执行 Graph
+  3. 将 Graph 执行结果转换为 AgentResult（与旧版保持兼容）
 
-Agent 执行全流程：
-  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-  │ 理解任务 │ → │ 制定计划 │ → │ 调用工具 │ → │ 观察结果 │ → │ 生成回答 │
-  └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+与旧版 AgentExecutor 的接口兼容：
+  - 方法签名：async run(user_input, chat_history) -> AgentResult
+  - chat_history 支持 str（ChatMemory 预格式化）或 list（旧版 LangChain 消息）
+  - 相同的返回类型：AgentResult（success, answer, plan, steps, tool_calls, ...）
+  - ChatService 传递字符串上下文，不再传递 LangChain 消息列表
 
-设计原则：
-  - Agent 执行与 HTTP 框架完全解耦：executor 不依赖 FastAPI
-  - 执行过程可观测：每一步都有日志记录和结构化输出
-  - 错误隔离：Agent 异常不影响服务可用性
+内部实现变化：
+  - 旧版：LangChain AgentExecutor.invoke()
+  - 新版：LangGraph compiled_graph.ainvoke()
+
+AgentResult 字段映射：
+  - final_answer → AgentResult.answer
+  - plan_summary  → AgentResult.plan
+  - steps[]       → AgentResult.steps（字符串列表）
+  - tool_calls[]  → AgentResult.tool_calls（ToolCallStep 列表）
+  - error         → AgentResult.error_message
 =============================================================================
 """
 
 import time
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from typing import Any
 
-from langchain_core.agents import AgentAction, AgentFinish
-from langchain_core.messages import AIMessage, HumanMessage
-
-from app.agent.agent import create_agent
-from app.agent.tool_registry import tool_registry
+from app.agent.graph import create_graph
+from app.agent.state import AgentState
 from app.utils.logger import logger
 
 
 # =============================================================================
-# 执行结果数据结构
+# 数据结构（与旧版完全兼容）
 # =============================================================================
 
 
 @dataclass
 class ToolCallStep:
     """
-    单次工具调用的记录（对应前端 Agent 过程面板中的一步）
-
-    字段说明：
-      - step_number: 步骤序号（从 1 开始）
-      - tool_name:   工具名称
-      - tool_input:  工具输入参数
-      - tool_output: 工具输出文本
-      - status:      执行状态（success / error）
-      - duration_ms: 耗时（毫秒）
+    单次工具调用记录（保持与旧版字段一致）
     """
-
-    step_number: int
-    tool_name: str
-    tool_input: dict | None
-    tool_output: str | None
+    step_number: int = 0
+    tool_name: str = ""
+    tool_input: dict | None = None
+    tool_output: Any = None
     status: str = "success"
     duration_ms: float = 0.0
 
@@ -63,18 +57,8 @@ class ToolCallStep:
 @dataclass
 class AgentResult:
     """
-    Agent 执行结果
-
-    字段说明：
-      - success:          是否执行成功
-      - answer:           Agent 最终回答文本
-      - plan:             执行计划（LLM 生成的思考链）
-      - steps:            执行步骤描述列表
-      - tool_calls:       工具调用记录列表
-      - error_message:    错误信息（仅失败时有值）
-      - total_duration_ms:总耗时（毫秒）
+    Agent 执行结果（保持与旧版字段一致）
     """
-
     success: bool = True
     answer: str = ""
     plan: str = ""
@@ -85,92 +69,174 @@ class AgentResult:
 
 
 # =============================================================================
-# Agent 执行器
+# AgentExecutor
 # =============================================================================
 
 
 class AgentExecutor:
     """
-    Agent 执行器 — 管理 Agent 的生命周期
+    LangGraph Agent 执行器
 
     用法：
         executor = AgentExecutor()
+
+        # 推荐方式：ChatMemory 预格式化的上下文字符串
         result = await executor.run(
             user_input="明天北京天气怎么样？",
-            chat_history=[],  # 可选：对话历史
+            chat_history="[历史对话摘要]\n用户问了深圳天气...\n\n[最近对话]\n用户: 你好\n助手: 你好！",
         )
+
+        # 兼容旧版：LangChain 消息列表
+        result = await executor.run(
+            user_input="明天北京天气怎么样？",
+            chat_history=[HumanMessage(...), AIMessage(...)],
+        )
+
+    初始化：
+        - 自动创建 LLM 和编译好的 Graph
+        - 所有请求复用同一个 Graph 实例（Graph 本身无状态）
     """
 
     def __init__(self):
-        # 获取所有 LangChain 工具
-        self._tools = tool_registry.get_all_langchain_tools()
-        # 创建 Agent 实例
-        self._agent = create_agent(tools=self._tools)
-        logger.info(f"AgentExecutor 初始化完成 | tools_count={len(self._tools)}")
+        # 延迟导入 create_llm，避免在模块加载时初始化
+        from app.agent.agent import create_llm
+
+        self._llm = create_llm()
+        self._graph = create_graph(self._llm)
+        logger.info("AgentExecutor (LangGraph) 初始化完成")
 
     async def run(
         self,
         user_input: str,
-        chat_history: list | None = None,
+        chat_history: list | str | None = None,
     ) -> AgentResult:
         """
-        执行 Agent 的完整工作流
+        执行 Agent 完整工作流
 
         参数：
             user_input:   用户输入文本
-            chat_history: 历史对话消息列表（LangChain 消息格式，可选）
+            chat_history: 对话上下文，支持两种类型：
+                          - str:  ChatMemory 预格式化的上下文（摘要 + 最近对话）
+                                 直接注入 AgentState.chat_history，无需再次处理
+                          - list: LangChain HumanMessage/AIMessage 消息列表（兼容旧版调用）
+                                  转换为纯文本后注入（只取最近 6 条）
+                          - None: 无历史对话
 
         返回值：
-            AgentResult，包含最终回答和执行过程
+            AgentResult：包含最终回答和执行过程
         """
         start_time = time.perf_counter()
+
+        logger.info(f"[Agent] 开始执行 | 用户输入=\"{user_input[:100]}\"")
+
+        # =================================================================
+        # Step 1: 准备对话历史文本
+        # =================================================================
+        if isinstance(chat_history, str):
+            # 新模式：ChatMemory 已格式化好上下文，直接使用
+            chat_history_text = chat_history.strip() if chat_history else "（无历史对话）"
+            logger.debug(
+                f"[Agent] 使用预格式化上下文 | 长度={len(chat_history_text)}字符"
+            )
+        elif chat_history:
+            # 兼容旧版：LangChain 消息列表 → 纯文本（只取最近 6 条）
+            parts = []
+            for msg in chat_history[-6:]:
+                role = getattr(msg, "type", "unknown")
+                content = getattr(msg, "content", "")
+                if role == "human":
+                    parts.append(f"用户: {content}")
+                elif role == "ai":
+                    parts.append(f"助手: {content}")
+            chat_history_text = "\n".join(parts) if parts else "（无历史对话）"
+        else:
+            chat_history_text = "（无历史对话）"
+
+        # =================================================================
+        # Step 2: 初始化 AgentState
+        # =================================================================
+        initial_state: AgentState = {
+            # 输入层
+            "user_message": user_input,
+            "conversation_id": "",
+            "chat_history": chat_history_text,
+            "start_time": start_time,
+            # 推理层（待填充）
+            "understanding": "",
+            "plan_summary": "",
+            "plan_steps": [],
+            "current_step_index": 0,
+            "city": "",
+            "adcode": "",
+            # 执行层（待追加）
+            "tool_calls": [],
+            "observations": [],
+            # 控制层
+            "next_action": "continue",
+            "iteration_count": 0,
+            "retry_count": 0,
+            # 输出层（待填充）
+            "final_answer": "",
+            "steps": [],
+            "error": "",
+        }
+
         result = AgentResult()
 
-        logger.info(f"Agent 开始执行 | 用户输入=\"{user_input[:100]}\"")
-
+        # =================================================================
+        # Step 3: 执行 Graph
+        # =================================================================
         try:
-            # ---- Step 1: 构建输入 ----
-            # 构造 LangChain Agent 的输入格式
-            agent_input = {
-                "input": user_input,
-                "chat_history": chat_history or [],
-                "current_date": datetime.now(timezone.utc).strftime("%Y年%m月%d日"),
-            }
+            final_state = await self._graph.ainvoke(initial_state)
 
-            # ---- Step 2: 执行 Agent ----
-            # invoke 方法是同步的，但内部 LLM 调用是异步的
-            # LangChain 的 invoke 在同步上下文中也能正常工作
-            raw_result = self._agent.invoke(agent_input)
-
-            # ---- Step 3: 解析执行过程 ----
-            self._parse_intermediate_steps(raw_result, result)
-
-            # ---- Step 4: 提取最终回答 ----
-            # LangChain ReAct Agent 的输出在 "output" 字段
-            result.answer = raw_result.get("output", "")
-
-            if not result.answer:
-                result.answer = "抱歉，我无法处理您的请求，请稍后重试。"
-
+            # =================================================================
+            # Step 4: 转换为 AgentResult
+            # =================================================================
             result.success = True
+            result.answer = final_state.get("final_answer", "")
+            result.plan = final_state.get("plan_summary", "")
+            result.error_message = final_state.get("error", "")
+
+            # 转换 steps（dict → 简化为字符串列表 + 完整对象）
+            raw_steps = final_state.get("steps", [])
+            result.steps = [
+                s.get("name", f"步骤{i+1}")
+                for i, s in enumerate(raw_steps)
+            ]
+
+            # 转换 tool_calls
+            tool_call_step_number = 0
+            for tc in final_state.get("tool_calls", []):
+                tool_call_step_number += 1
+                tool_output = tc.get("tool_output", "")
+
+                result.tool_calls.append(ToolCallStep(
+                    step_number=tool_call_step_number,
+                    tool_name=tc.get("tool_name", ""),
+                    tool_input=tc.get("tool_input"),
+                    tool_output=tool_output,
+                    status=tc.get("status", "success"),
+                    duration_ms=tc.get("duration_ms", 0.0),
+                ))
 
         except Exception as exc:
-            # ---- 异常处理 ----
             result.success = False
             result.error_message = str(exc)
             result.answer = f"抱歉，Agent 执行过程中出现错误：{str(exc)}"
 
             logger.error(
-                f"Agent 执行异常 | error={str(exc)}\n{traceback.format_exc()}"
+                f"[Agent] 执行异常 | error={str(exc)}\n{traceback.format_exc()}"
             )
 
-        # ---- 计算总耗时 ----
+        # =================================================================
+        # Step 5: 计算总耗时
+        # =================================================================
         result.total_duration_ms = round(
             (time.perf_counter() - start_time) * 1000, 2
         )
 
         logger.info(
-            f"Agent 执行完成 | success={result.success} | "
+            f"[Agent] 执行完成 | success={result.success} | "
             f"耗时={result.total_duration_ms}ms | "
             f"工具调用={len(result.tool_calls)}次 | "
             f"回答长度={len(result.answer)}字符"
@@ -178,91 +244,17 @@ class AgentExecutor:
 
         return result
 
-    def _parse_intermediate_steps(
-        self,
-        raw_result: dict,
-        result: AgentResult,
-    ) -> None:
-        """
-        解析 Agent 的中间执行步骤
-
-        从 LangChain 的 intermediate_steps 中提取：
-          - 计划/思考链
-          - 工具调用记录
-          - 执行步骤描述
-
-        参数：
-            raw_result: LangChain Agent 的原始输出
-            result:     要填充的 AgentResult 对象
-        """
-        steps = raw_result.get("intermediate_steps", [])
-
-        if not steps:
-            result.plan = "无需工具调用，直接回答"
-            result.steps = ["分析用户问题", "直接生成回答"]
-            return
-
-        plan_parts = []
-        step_descriptions = []
-
-        step_number = 0
-        for step in steps:
-            if len(step) < 2:
-                continue
-
-            action: AgentAction = step[0]
-            observation = step[1]
-
-            step_number += 1
-
-            # 提取工具输入
-            tool_input = action.tool_input if isinstance(action.tool_input, dict) else {"input": str(action.tool_input)}
-
-            # 提取工具输出
-            if isinstance(observation, str):
-                tool_output = observation
-            elif isinstance(observation, list):
-                # 有时候 observation 是消息列表
-                tool_output = str(observation[0]) if observation else ""
-            else:
-                tool_output = str(observation)
-
-            # 记录工具调用
-            result.tool_calls.append(ToolCallStep(
-                step_number=step_number,
-                tool_name=action.tool,
-                tool_input=tool_input,
-                tool_output=tool_output[:500] if tool_output else None,
-                status="success",
-            ))
-
-            # 计划描述
-            plan_parts.append(f"步骤{step_number}: 调用 {action.tool} 工具")
-            step_descriptions.append(
-                f"调用 {action.tool} 工具获取数据"
-            )
-
-        result.plan = " → ".join(plan_parts) + " → 综合分析并生成回答"
-        result.steps = step_descriptions + ["分析工具返回数据", "生成最终回答"]
-
 
 # =============================================================================
 # 全局单例
 # =============================================================================
 
-# 全局唯一的 Agent 执行器实例
-# 在模块加载时初始化，所有请求共享同一个执行器
-# 注意：Agent 本身是无状态的（每次调用独立），所以线程安全
 _global_executor: AgentExecutor | None = None
 
 
 def get_agent_executor() -> AgentExecutor:
     """
-    获取全局 Agent 执行器实例
-
-    懒加载模式：首次调用时创建，后续直接返回。
-    这样即使 Agent 初始化失败（如 API Key 未配置），
-    也不会导致模块加载失败，而是在首次请求时才报错。
+    获取全局 Agent 执行器实例（懒加载）
 
     返回值：
         AgentExecutor 实例

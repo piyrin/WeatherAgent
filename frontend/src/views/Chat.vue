@@ -31,12 +31,10 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-// 当前使用 Mock 服务进行开发和演示
-// 当后端开发完成后，只需将下面的 import 改为：
-//   import { sendMessage } from '@/api/chat.js'
-// 无需修改其他代码
+import config from '@/config/index.js'
+import { sendMessage } from '@/api/chat.js'
 import { sendMessageMock } from '@/mock/chatMock.js'
 import ChatBox from '@/components/ChatBox.vue'
 import InputPanel from '@/components/InputPanel.vue'
@@ -49,6 +47,7 @@ const isLoading = ref(false)
 const agentSteps = ref([])
 const currentStep = ref(-1)
 const toolCalls = ref([])
+const conversationId = ref(null)
 
 let messageId = 0
 
@@ -83,24 +82,18 @@ async function handleSend(text) {
   addMessage('assistant', '正在分析你的问题...', true)
 
   try {
-    // 使用 Mock 服务，传入 onStepUpdate 回调实现步骤的流式更新
-    // 当后端完成后，替换为：
-    //   const result = await sendMessage(text)
-    //   agentSteps.value = result.steps || []
-    //   toolCalls.value = result.tools || []
-    //   updateLastMessage(result.answer)
-
-    const result = await sendMessageMock(text, (updatedSteps) => {
-      // 此回调在 Mock 服务中每个步骤执行时被调用
-      // 用于实现 Timeline 的实时更新效果
-      agentSteps.value = updatedSteps
-      currentStep.value = updatedSteps.findIndex(s => s.status === 'running')
-    })
+    const result = config.useMock
+      ? await sendMessageMock(text, (updatedSteps) => {
+          agentSteps.value = updatedSteps
+          currentStep.value = updatedSteps.findIndex(s => s.status === 'running')
+        })
+      : await sendMessage(text, conversationId.value)
 
     // 更新完整结果
     agentSteps.value = result.steps || []
     currentStep.value = result.steps ? result.steps.length - 1 : -1
     toolCalls.value = result.tools || []
+    conversationId.value = result.conversationId || conversationId.value
 
     // 更新最终回答
     updateLastMessage(result.answer || '抱歉，我暂时无法回答这个问题。')
@@ -126,6 +119,7 @@ function clearMessages() {
   agentSteps.value = []
   toolCalls.value = []
   currentStep.value = -1
+  conversationId.value = null
   messageId = 0
   ElMessage.success('已清空对话')
 }
