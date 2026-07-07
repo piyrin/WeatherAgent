@@ -39,7 +39,8 @@ request.interceptors.response.use(
     if (config.debug) {
       debugLog(`← ${response.config.url}`, response.data)
     }
-    return response.data
+    const data = response.data
+    return data.data !== undefined ? data.data : data
   },
   (error) => {
     const message = error.response?.data?.detail || error.message || '请求失败'

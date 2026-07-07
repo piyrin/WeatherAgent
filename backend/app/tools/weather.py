@@ -97,41 +97,54 @@ class WeatherTool(BaseTool):
         """
         调用第三方天气 API
 
-        当前使用模拟数据。
-        接入真实 API 的方案（如 OpenWeatherMap）：
-            url = "https://api.openweathermap.org/data/2.5/weather"
-            params = {"q": city, "appid": settings.WEATHER_API_KEY, "units": "metric"}
-            resp = requests.get(url, params=params, timeout=10)
-            resp.raise_for_status()
-            return resp.json()
+        使用 wttr.in 免费天气服务（不需要 API key）
         """
-        # ---- 模拟数据（开发阶段使用） ----
-        # 根据城市名生成稍微不同的模拟数据，方便测试
-        city_hash = sum(ord(c) for c in city) % 10
+        try:
+            url = f"https://wttr.in/{city}?format=j1"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
 
-        mock_weathers = {
-            0: {"condition": "晴", "temp_high": 32, "temp_low": 22, "humidity": 45, "wind": "东南风 2-3级"},
-            1: {"condition": "多云", "temp_high": 28, "temp_low": 20, "humidity": 55, "wind": "北风 3-4级"},
-            2: {"condition": "阴", "temp_high": 25, "temp_low": 18, "humidity": 70, "wind": "东北风 3级"},
-            3: {"condition": "小雨", "temp_high": 22, "temp_low": 16, "humidity": 85, "wind": "东风 4-5级"},
-            4: {"condition": "中雨", "temp_high": 20, "temp_low": 15, "humidity": 90, "wind": "东风 5-6级"},
-            5: {"condition": "晴转多云", "temp_high": 30, "temp_low": 21, "humidity": 50, "wind": "南风 2级"},
-            6: {"condition": "雷阵雨", "temp_high": 27, "temp_low": 19, "humidity": 80, "wind": "西风 4级"},
-            7: {"condition": "雾霾", "temp_high": 24, "temp_low": 17, "humidity": 60, "wind": "无持续风向 1-2级"},
-            8: {"condition": "暴晒", "temp_high": 36, "temp_low": 26, "humidity": 35, "wind": "西南风 2级"},
-            9: {"condition": "阵雪", "temp_high": -3, "temp_low": -10, "humidity": 65, "wind": "北风 5-6级"},
-        }
+            current_condition = data.get("current_condition", [])[0] if data.get("current_condition") else {}
+            nearest_area = data.get("nearest_area", [])[0] if data.get("nearest_area") else {}
+            area_name = nearest_area.get("areaName", [])[0].get("value", "") if nearest_area.get("areaName") else city
 
-        weather = mock_weathers.get(city_hash, mock_weathers[0])
-        # 如果有日期，稍微修改温度和天气（模拟不同日期的天气变化）
-        if date:
-            import hashlib
-            date_hash = int(hashlib.md5(date.encode()).hexdigest()[:2], 16) % 5
-            weather = dict(weather)
-            weather["temp_high"] += date_hash - 2
-            weather["temp_low"] += date_hash - 2
+            weather_data = {
+                "condition": current_condition.get("weatherDesc", [])[0].get("value", "未知") if current_condition.get("weatherDesc") else "未知",
+                "temp_high": int(current_condition.get("temp_C", 25)),
+                "temp_low": int(current_condition.get("temp_C", 18)),
+                "humidity": int(current_condition.get("humidity", 50)),
+                "wind": current_condition.get("winddir16Point", "") + " " + current_condition.get("windspeedKmph", "") + "km/h" if current_condition else "未知",
+                "city_name": area_name,
+            }
 
-        return weather
+            if date:
+                forecast = data.get("weather", [])
+                for day in forecast:
+                    if day.get("date") == date:
+                        weather_data["condition"] = day.get("hourly", [])[0].get("weatherDesc", [])[0].get("value", weather_data["condition"]) if day.get("hourly") else weather_data["condition"]
+                        weather_data["temp_high"] = int(day.get("maxtempC", weather_data["temp_high"]))
+                        weather_data["temp_low"] = int(day.get("mintempC", weather_data["temp_low"]))
+                        break
+
+            return weather_data
+
+        except Exception as e:
+            logger.error(f"调用天气 API 失败: {e}")
+            city_hash = sum(ord(c) for c in city) % 10
+            mock_weathers = {
+                0: {"condition": "晴", "temp_high": 32, "temp_low": 22, "humidity": 45, "wind": "东南风 2-3级"},
+                1: {"condition": "多云", "temp_high": 28, "temp_low": 20, "humidity": 55, "wind": "北风 3-4级"},
+                2: {"condition": "阴", "temp_high": 25, "temp_low": 18, "humidity": 70, "wind": "东北风 3级"},
+                3: {"condition": "小雨", "temp_high": 22, "temp_low": 16, "humidity": 85, "wind": "东风 4-5级"},
+                4: {"condition": "中雨", "temp_high": 20, "temp_low": 15, "humidity": 90, "wind": "东风 5-6级"},
+                5: {"condition": "晴转多云", "temp_high": 30, "temp_low": 21, "humidity": 50, "wind": "南风 2级"},
+                6: {"condition": "雷阵雨", "temp_high": 27, "temp_low": 19, "humidity": 80, "wind": "西风 4级"},
+                7: {"condition": "雾霾", "temp_high": 24, "temp_low": 17, "humidity": 60, "wind": "无持续风向 1-2级"},
+                8: {"condition": "暴晒", "temp_high": 36, "temp_low": 26, "humidity": 35, "wind": "西南风 2级"},
+                9: {"condition": "阵雪", "temp_high": -3, "temp_low": -10, "humidity": 65, "wind": "北风 5-6级"},
+            }
+            return mock_weathers.get(city_hash, mock_weathers[0])
 
     def _format_summary(self, city: str, date: str | None, data: dict) -> str:
         """

@@ -1,30 +1,22 @@
 """
 =============================================================================
-LangChain Agent 工厂 — 创建配置好的 Agent 实例
+LLM + Tool Calling 核心模块
 =============================================================================
 职责：
   1. 根据配置创建 LLM 实例（支持多 Provider）
-  2. 加载 System Prompt（定义 Agent 的行为模式）
-  3. 绑定 Tools 到 LLM（实现 Function Calling）
-  4. 创建并返回 ReAct Agent
+  2. generate_plan：让 LLM 生成结构化执行计划（规范第3节）
+  3. generate_answer：让 LLM 根据工具调用结果生成最终回答
+  4. 提供 System Prompt 管理
 
-Agent 类型：
-  使用 LangChain 的 create_react_agent，它支持：
-    - ReAct 模式：思考(Thought) → 行动(Action) → 观察(Observation) → ...
-    - Function Calling：LLM 自动选择并调用工具
-    - 多轮推理：根据工具返回结果继续思考
-
-设计原则：
-  - LLM Provider 可切换：通过 settings.LLM_PROVIDER 切换模型厂商
-  - Tool 动态绑定：从 tool_registry 获取工具列表，无需硬编码
-  - Prompt 模板化：System Prompt 独立管理，方便调优
+规范依据：agent_interface_spec.md 第3节（Planner 输出格式）
 =============================================================================
 """
 
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+import json
+from typing import Any, Dict, List
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import BaseTool as LangChainBaseTool
 
 from app.core.config import settings
 from app.utils.logger import logger
@@ -34,36 +26,28 @@ from app.utils.logger import logger
 # LLM 工厂 — 根据配置创建对应 Provider 的 ChatModel
 # =============================================================================
 
-def _create_zhipuai_chat_model() -> BaseChatModel:
-    """
-    创建智谱 AI（ChatGLM）的 ChatModel
 
-    使用 langchain-community 的 ChatZhipuAI。
-    需要安装：pip install langchain-community
-    """
+def _create_zhipuai_chat_model() -> BaseChatModel:
     try:
         from langchain_community.chat_models import ChatZhipuAI
-
         return ChatZhipuAI(
             model=settings.LLM_MODEL,
             api_key=settings.LLM_API_KEY,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
+            base_url=settings.LLM_BASE_URL,
         )
     except ImportError:
         logger.error("未安装 langchain-community，回退到 OpenAI 兼容接口")
         return _create_openai_compatible_chat_model()
+    except Exception as e:
+        logger.error(f"创建 ZhipuAI 模型失败: {e}，回退到 OpenAI 兼容接口")
+        return _create_openai_compatible_chat_model()
 
 
 def _create_openai_compatible_chat_model() -> BaseChatModel:
-    """
-    通过 OpenAI 兼容接口创建 ChatModel
-
-    适用于大多数国产模型厂商（智谱、通义千问、DeepSeek 等），
-    它们都提供与 OpenAI API 兼容的接口。
-    """
     from langchain_openai import ChatOpenAI
-
+    logger.debug(f"创建 OpenAI 兼容模型 | model={settings.LLM_MODEL} | base_url={settings.LLM_BASE_URL} | api_key_length={len(settings.LLM_API_KEY) if settings.LLM_API_KEY else 0}")
     return ChatOpenAI(
         model=settings.LLM_MODEL,
         base_url=settings.LLM_BASE_URL,
@@ -73,27 +57,28 @@ def _create_openai_compatible_chat_model() -> BaseChatModel:
     )
 
 
-# LLM Provider 工厂映射表
-# 新增 Provider 时在此字典中添加一项即可
+def _create_anthropic_compatible_chat_model() -> BaseChatModel:
+    from langchain_anthropic import ChatAnthropic
+    logger.debug(f"创建 Anthropic 兼容模型 | model={settings.LLM_MODEL} | base_url={settings.LLM_BASE_URL} | api_key_length={len(settings.LLM_API_KEY) if settings.LLM_API_KEY else 0}")
+    return ChatAnthropic(
+        model=settings.LLM_MODEL,
+        base_url=settings.LLM_BASE_URL,
+        api_key=settings.LLM_API_KEY,
+        temperature=settings.LLM_TEMPERATURE,
+        max_tokens=settings.LLM_MAX_TOKENS,
+    )
+
+
 _PROVIDER_FACTORY = {
     "zhipuai": _create_zhipuai_chat_model,
     "openai": _create_openai_compatible_chat_model,
-    "qwen": _create_openai_compatible_chat_model,      # 通义千问使用 OpenAI 兼容接口
-    "deepseek": _create_openai_compatible_chat_model,   # DeepSeek 使用 OpenAI 兼容接口
-    "moonshot": _create_openai_compatible_chat_model,   # Moonshot 使用 OpenAI 兼容接口
+    "qwen": _create_openai_compatible_chat_model,
+    "deepseek": _create_anthropic_compatible_chat_model,
+    "moonshot": _create_openai_compatible_chat_model,
 }
 
 
 def create_llm() -> BaseChatModel:
-    """
-    根据配置创建 LLM 实例
-
-    通过 settings.LLM_PROVIDER 查找对应的工厂函数并调用。
-    如果 provider 不在映射表中，默认使用 OpenAI 兼容接口。
-
-    返回值：
-        BaseChatModel 实例（LangChain 标准聊天模型）
-    """
     provider = settings.LLM_PROVIDER.lower()
     factory = _PROVIDER_FACTORY.get(provider)
 
@@ -116,86 +101,234 @@ def create_llm() -> BaseChatModel:
 # System Prompt — 定义 Agent 的行为模式
 # =============================================================================
 
-SYSTEM_PROMPT = """你是一个专业的天气与出行助手智能体，名叫"小天气"。
 
-## 你的能力
-你可以使用以下工具来帮助用户：
-- **weather**: 查询城市天气（温度、湿度、风力、天气状况等）
-- **date_parser**: 解析自然语言日期（如"明天"→具体日期）
-- **route_planner**: 规划出行路线（距离、耗时、出行建议）
-- **calculator**: 执行数学计算
+PLAN_PROMPT = """你是一个严格的计划制定助手，必须为天气与出行助手智能体制定包含工具调用的执行计划。
 
-## 你的工作流程
-当用户提出问题时，你需要：
-1. **理解意图**：分析用户真正想知道什么
-2. **制定计划**：确定需要调用哪些工具、按什么顺序调用
-3. **执行调用**：使用工具获取准确数据
-4. **综合分析**：结合工具返回的数据，给出专业、完整的回答
-5. **出行建议**：如果涉及出行，结合天气给出建议（是否适合出门、穿什么、带不带伞等）
+## 你的任务
+分析用户问题，识别需要调用的工具，生成结构化的执行计划 JSON。
 
-## 行为规范
-- 回答前先分析问题，不要直接猜测
-- 涉及日期的地方先调用 date_parser 解析，不要自己算
-- 涉及天气的地方必须调用 weather 工具，不要编造数据
-- 回答要简洁、有条理，使用 Markdown 格式
-- 如果工具调用失败，诚实告知用户并给出替代建议
+## 必须调用工具的情况
+- 用户提到天气、温度、下雨、带伞 → 必须调用 weather 工具
+- 用户提到明天、后天、下周X、日期 → 必须调用 date_parser 工具
+- 用户提到路线、出行、去某地 → 必须调用 route_planner 工具
+- 用户提到计算、数学问题 → 必须调用 calculator 工具
+
+## 计划格式要求
+必须返回严格的 JSON 格式，包含以下字段：
+{{
+  "user_intent": "用户意图的自然语言描述",
+  "intent_category": "意图分类（weather_check/travel_advice/date_query/calculation/general_chat）",
+  "reasoning": "必须说明为什么调用这些工具",
+  "plan": [
+    {{
+      "step_id": 1,
+      "action": "call_tool",
+      "tool_name": "date_parser",
+      "tool_input": {{"date_text": "明天"}},
+      "reason": "解析相对日期",
+      "depends_on": [],
+      "on_failure": "abort"
+    }},
+    {{
+      "step_id": 2,
+      "action": "call_tool",
+      "tool_name": "weather",
+      "tool_input": {{"city": "北京", "date": "$step_1.date"}},
+      "reason": "查询天气",
+      "depends_on": [1],
+      "on_failure": "skip_and_notify"
+    }},
+    {{
+      "step_id": 3,
+      "action": "observe",
+      "reason": "分析工具结果",
+      "depends_on": [2]
+    }},
+    {{
+      "step_id": 4,
+      "action": "answer",
+      "reason": "生成最终回答",
+      "depends_on": [1, 2, 3]
+    }}
+  ],
+  "total_steps": 4,
+  "estimated_tools": ["date_parser", "weather"]
+}}
+
+## 可用工具
+- weather: 查询城市天气（参数：city, date）
+- date_parser: 解析自然语言日期（参数：date_text）
+- route_planner: 规划出行路线（参数：origin, destination, travel_mode）
+- calculator: 执行数学计算（参数：expression）
 
 ## 当前信息
-当前日期：{current_date}
-用户所在城市（如果未指定）：默认使用北京
+当前时间：{current_time}
 
-现在，请开始帮助用户解决问题。
+## 示例
+用户：明天北京天气怎么样？
+输出：
+{{
+  "user_intent": "查询明天北京的天气",
+  "intent_category": "weather_check",
+  "reasoning": "用户提到了'明天'（相对日期）和'北京'（城市），需要先解析日期，再查询天气",
+  "plan": [
+    {{"step_id": 1, "action": "call_tool", "tool_name": "date_parser", "tool_input": {{"date_text": "明天"}}, "reason": "解析'明天'为具体日期", "depends_on": [], "on_failure": "abort"}},
+    {{"step_id": 2, "action": "call_tool", "tool_name": "weather", "tool_input": {{"city": "北京", "date": "$step_1.date"}}, "reason": "查询北京天气", "depends_on": [1], "on_failure": "skip_and_notify"}},
+    {{"step_id": 3, "action": "observe", "reason": "分析天气结果", "depends_on": [2]}},
+    {{"step_id": 4, "action": "answer", "reason": "生成回答", "depends_on": [1, 2, 3]}}
+  ],
+  "total_steps": 4,
+  "estimated_tools": ["date_parser", "weather"]
+}}
+
+请只返回 JSON，不要包含任何其他文字。
+"""
+
+
+ANSWER_PROMPT = """你是一个专业的天气与出行助手智能体，名叫"小天气"。
+
+## 你的任务
+根据以下信息，生成最终回答：
+
+### 用户问题
+{user_message}
+
+### 执行计划
+{plan_summary}
+
+### 工具调用结果
+{tool_results}
+
+### 观察结论
+{observations}
+
+## 回答要求
+1. 基于工具返回的实际数据回答，不要编造
+2. 回答要简洁、有条理，使用 Markdown 格式
+3. 如果涉及出行，结合天气给出建议（是否适合出门、穿什么、带不带伞等）
+4. 如果工具调用失败，诚实告知用户并给出替代建议
+5. 不要提到"工具"、"调用"等技术术语，用自然语言回答
+
+请直接输出最终回答，不要包含任何前缀或后缀。
 """
 
 
 # =============================================================================
-# Agent 创建函数
+# Planner — 生成结构化执行计划
 # =============================================================================
 
-def create_agent(tools: list[LangChainBaseTool]) -> "AgentExecutor":
+
+def generate_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    创建配置好的 LangChain Agent
+    根据用户问题生成结构化执行计划
 
     参数：
-        tools: LangChain BaseTool 列表（从 tool_registry 获取）
+        state: AgentState
 
     返回值：
-        AgentExecutor 实例，可以直接调用 invoke({"input": "..."})
-
-    注意：
-        - 需要先创建 LLM 实例（create_llm()）
-        - 需要先从 tool_registry 获取工具列表
-        - Agent 内部使用 Tool Calling（Function Calling）模式进行推理和工具调用
+        符合规范第3节的 Plan 结构
     """
-    # 创建 LLM
     llm = create_llm()
 
-    # 构建 Prompt 模板
-    # MessagesPlaceholder 会在运行时插入对话历史和中间步骤
     prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="chat_history", optional=True),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ("system", PLAN_PROMPT),
+        ("human", "{user_message}"),
     ])
 
-    # 创建 Tool Calling Agent（使用 Function Calling，无需 ReAct 模板）
-    agent = create_tool_calling_agent(
-        llm=llm,
-        tools=tools,
-        prompt=prompt,
-    )
+    chain = prompt | llm
 
-    # 使用 AgentExecutor 运行 Agent，它会自动处理 intermediate_steps 循环
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=settings.APP_DEBUG,
-        handle_parsing_errors=True,
-    )
+    response = chain.invoke({
+        "user_message": state["user_message"],
+        "current_time": state["current_time"],
+    })
 
-    logger.info(
-        f"Agent 创建成功 | tools={[t.name for t in tools]}"
-    )
+    content = response.content.strip()
+    print(f"[DEBUG] LLM 返回内容: {content[:2000]}")
 
-    return agent_executor
+    try:
+        plan = json.loads(content)
+        print(f"[DEBUG] Plan JSON 解析成功: {json.dumps(plan, ensure_ascii=False)[:500]}")
+    except json.JSONDecodeError as e:
+        print(f"[DEBUG] Plan JSON 解析失败 | 错误: {e} | 原始内容: {content[:1000]}")
+        plan = _create_fallback_plan(state["user_message"])
+
+    if not isinstance(plan, dict) or "plan" not in plan:
+        print(f"[DEBUG] Plan 格式不正确 | plan字段缺失或类型错误: {type(plan)}")
+        plan = _create_fallback_plan(state["user_message"])
+
+    logger.info(f"Plan 生成成功 | intent_category={plan.get('intent_category')} | total_steps={plan.get('total_steps')}")
+    return plan
+
+
+def _create_fallback_plan(user_message: str) -> Dict[str, Any]:
+    """创建兜底计划"""
+    plan = {
+        "user_intent": user_message,
+        "intent_category": "general_chat",
+        "reasoning": "无法生成结构化计划，直接回答",
+        "plan": [
+            {
+                "step_id": 1,
+                "action": "answer",
+                "reason": "直接回答用户问题",
+                "depends_on": [],
+                "on_failure": "abort",
+            }
+        ],
+        "total_steps": 1,
+        "estimated_tools": [],
+    }
+    return plan
+
+
+# =============================================================================
+# Answer Generator — 生成最终回答
+# =============================================================================
+
+
+def generate_answer(state: Dict[str, Any]) -> str:
+    """
+    根据工具调用结果生成最终回答
+
+    参数：
+        state: AgentState
+
+    返回值：
+        最终回答文本
+    """
+    llm = create_llm()
+
+    plan = state.get("plan", {})
+    plan_summary = json.dumps(plan, ensure_ascii=False) if plan else "无"
+
+    tool_calls = state.get("tool_calls", [])
+    tool_results = []
+    for tc in tool_calls:
+        result = tc.get("tool_output", {})
+        tool_results.append({
+            "tool_name": tc.get("tool_name"),
+            "input": tc.get("tool_input"),
+            "result": result.get("result"),
+            "summary": result.get("summary"),
+            "success": result.get("success"),
+        })
+
+    observations = state.get("observations", [])
+    observation_texts = [obs.get("observation", "") for obs in observations]
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", ANSWER_PROMPT),
+        ("human", "用户问题: {user_message}\n执行计划: {plan_summary}\n工具调用结果: {tool_results}\n观察结论: {observations}"),
+    ])
+
+    chain = prompt | llm
+
+    response = chain.invoke({
+        "user_message": state["user_message"],
+        "plan_summary": plan_summary,
+        "tool_results": json.dumps(tool_results, ensure_ascii=False),
+        "observations": "\n".join(observation_texts) if observation_texts else "无",
+    })
+
+    answer = response.content.strip()
+    return answer

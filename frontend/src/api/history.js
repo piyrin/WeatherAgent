@@ -9,8 +9,8 @@ import request from './request.js'
 
 /**
  * 获取历史记录列表（分页）
- * @param {Object} params - { page, size }
- * @returns {Promise<{records: Array, total: number}>}
+ * @param {Object} params - { page, page_size }
+ * @returns {Promise<{conversations: Array, total: number, page: number, page_size: number}>}
  */
 export function getHistory(params = {}) {
   return request.get('/v1/history', { params })

@@ -82,8 +82,13 @@ async def chat(
         conversation_id=request.conversation_id,
     )
 
-    # 返回统一格式
+    # 返回统一格式（对齐前端期望的字段结构）
+    result_data = result.model_dump()
+    result_data["answer"] = result_data["message"]
+    result_data["steps"] = result_data.get("agent_process", {}).get("steps", [])
+    result_data["tools"] = result_data.get("agent_process", {}).get("tool_calls", [])
+    
     return success(
-        data=result.model_dump(),
+        data=result_data,
         message="ok",
     )

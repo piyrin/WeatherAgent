@@ -31,6 +31,7 @@ langchain>=0.3.0,<1.0.0
 langchain-core>=0.3.0,<1.0.0
 langchain-openai>=0.2.0,<1.0.0        # OpenAI 兼容接口（智谱/DeepSeek 等）
 langchain-community>=0.3.0,<1.0.0     # 社区模型（ChatZhipuAI 等）
+langgraph>=0.2.0,<1.0.0              # LangGraph 状态机（Agent 工作流）
 pyjwt>=2.8.0                          # ChatZhipuAI 依赖的 JWT 签名
 
 # -------------------------------- HTTP 客户端 --------------------------------
