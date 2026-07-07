@@ -20,11 +20,19 @@
         <template #header>
           <div class="tool-card-header">
             <el-tag
-              :type="getTagType(index)"
+              :type="getTagType(tool.status, index)"
               size="small"
               effect="plain"
-            >{{ tool.name || 'Tool' }}</el-tag>
-            <span class="tool-badge">调用 #{{ index + 1 }}</span>
+            >
+              <el-icon v-if="tool.status === 'running'" class="is-loading"><Loading /></el-icon>
+              {{ tool.name || 'Tool' }}
+            </el-tag>
+            <span class="tool-badge">
+              调用 #{{ index + 1 }}
+              <span v-if="tool.status" class="tool-status" :class="`status-${tool.status}`">
+                {{ getStatusText(tool.status) }}
+              </span>
+            </span>
           </div>
         </template>
 
@@ -45,6 +53,8 @@
 </template>
 
 <script setup>
+import { Loading } from '@element-plus/icons-vue'
+
 defineProps({
   tools: {
     type: Array,
@@ -52,9 +62,25 @@ defineProps({
   }
 })
 
-function getTagType(index) {
+function getTagType(status, index) {
+  if (status === 'running') return 'primary'
+  if (status === 'failed') return 'danger'
+  if (status === 'retrying') return 'warning'
+  if (status === 'completed') return 'success'
+  // 无 status 时按索引循环颜色（向后兼容）
   const types = ['primary', 'success', 'warning', 'info', 'danger']
   return types[index % types.length]
+}
+
+function getStatusText(status) {
+  const map = {
+    'pending': '等待中',
+    'running': '执行中',
+    'completed': '成功',
+    'failed': '失败',
+    'retrying': '重试中'
+  }
+  return map[status] || ''
 }
 
 function formatValue(value) {
@@ -124,6 +150,36 @@ function formatValue(value) {
 .tool-badge {
   font-size: 11px;
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-status {
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.tool-status.status-running {
+  color: #3b82f6;
+  background: #dbeafe;
+}
+
+.tool-status.status-completed {
+  color: #10b981;
+  background: #d1fae5;
+}
+
+.tool-status.status-failed {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+.tool-status.status-retrying {
+  color: #f59e0b;
+  background: #fef3c7;
 }
 
 .tool-detail {

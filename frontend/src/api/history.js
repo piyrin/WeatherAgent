@@ -2,7 +2,7 @@
  * 历史记录相关接口
  *
  * 所有接口基于 request.js（统一 baseURL / 拦截器）
- * 对接后端：GET /history | DELETE /history/:id | DELETE /history
+ * 对接后端：GET /api/v1/history | DELETE /api/v1/history/:id | DELETE /api/v1/history
  */
 
 import request from './request.js'
@@ -13,7 +13,7 @@ import request from './request.js'
  * @returns {Promise<{records: Array, total: number}>}
  */
 export function getHistory(params = {}) {
-  return request.get('/history', { params })
+  return request.get('/v1/history', { params })
 }
 
 /**
@@ -21,12 +21,12 @@ export function getHistory(params = {}) {
  * @param {string|number} id - 记录 ID
  */
 export function deleteHistory(id) {
-  return request.delete(`/history/${id}`)
+  return request.delete(`/v1/history/${id}`)
 }
 
 /**
  * 清空全部历史记录
  */
 export function clearHistory() {
-  return request.delete('/history')
+  return request.delete('/v1/history')
 }
