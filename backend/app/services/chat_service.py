@@ -67,6 +67,7 @@ class ChatService(BaseService):
         self,
         message: str,
         conversation_id: Optional[str] = None,
+        client_ip: str = "",
     ) -> ChatResponse:
         """
         处理用户消息并返回 Agent 回答
@@ -74,6 +75,7 @@ class ChatService(BaseService):
         参数：
             message:         用户输入文本
             conversation_id: 会话 ID（可选，不传则新建会话）
+            client_ip:       客户端真实 IP（从 HTTP 请求中提取，用于 IP 定位）
 
         返回值：
             ChatResponse（含 Agent 回答 + 执行过程）
@@ -119,6 +121,7 @@ class ChatService(BaseService):
         agent_result: AgentResult = await executor.run(
             user_input=message,
             chat_history=memory_context,
+            client_ip=client_ip,
         )
 
         # =====================================================================

@@ -171,6 +171,31 @@ async def executor_node(state: AgentState) -> dict:
 
     # 解析参数引用
     resolved_input = _resolve_params(tool_input_raw, state.get("tool_calls", []))
+
+    # ---- 自动注入 client_ip for ip_location 工具 ----
+    # 当 Planner 调用了 ip_location 但没传 ip 参数时，
+    # 自动从 AgentState 中获取客户端真实 IP 注入。
+    # 但是跳过本地/私有 IP（127.0.0.1、192.168.x.x 等）—
+    # 这些地址高德 API 无法定位，不注入让它走自动探测。
+    if tool_name == "ip_location" and not resolved_input.get("ip"):
+        client_ip = state.get("client_ip", "")
+        if client_ip and not _is_local_or_private_ip(client_ip):
+            resolved_input["ip"] = client_ip
+            logger.info(
+                f"[Executor] 自动注入客户端 IP for ip_location | "
+                f"ip={client_ip}"
+            )
+        elif client_ip:
+            logger.info(
+                f"[Executor] 跳过本地/私有 IP ({client_ip})，"
+                f"让 ip_location 走服务端自动探测"
+            )
+        else:
+            logger.info(
+                f"[Executor] client_ip 为空（开发环境），"
+                f"ip_location 将使用服务端 IP 自动探测"
+            )
+
     logger.debug(f"[Executor] Tool Input (解析后): {resolved_input}")
 
     # 记录开始时间
@@ -239,3 +264,32 @@ async def executor_node(state: AgentState) -> dict:
         "iteration_count": state.get("iteration_count", 0) + 1,
         "steps": [completed_step],
     }
+
+
+def _is_local_or_private_ip(ip: str) -> bool:
+    """
+    判断 IP 是否为本地/私有地址（无法用于公网 IP 定位）
+
+    过滤范围：
+      - 127.0.0.0/8、::1（loopback）
+      - 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16（私有地址）
+    注意：空字符串不算本地IP
+    """
+    if not ip:
+        return False
+    if ip in ("0.0.0.0", "::1"):
+        return True
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return True
+    try:
+        a, b = int(parts[0]), int(parts[1])
+    except ValueError:
+        return True
+    if a == 127 or a == 10:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 192 and b == 168:
+        return True
+    return False
