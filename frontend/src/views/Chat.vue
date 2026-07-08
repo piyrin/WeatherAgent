@@ -85,7 +85,12 @@ watch(() => store.currentConversationId, async (newId, oldId) => {
     clearChatState()
   } else if (newId && newId !== oldId) {
     // 选择了历史对话：加载消息
-    await loadConversation(newId)
+    // 排除：首次发消息后 handleSend 自动选中刚创建的对话（此时组件内部
+    // conversationId.value 已等于 newId，agent 执行过程和工具调用已就绪，
+    // 若调用 loadConversation 会把它们清空，导致右侧面板空白）
+    if (newId !== conversationId.value) {
+      await loadConversation(newId)
+    }
   }
 })
 

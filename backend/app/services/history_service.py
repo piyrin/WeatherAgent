@@ -24,6 +24,7 @@ from app.middleware.exception_handler import AppException
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.base_service import BaseService
+from app.utils.datetime import format_dt
 from app.utils.logger import logger
 
 
@@ -112,8 +113,8 @@ class HistoryService(BaseService):
                 "message_count": conv.message_count,
                 "first_user_message": first_user_preview,
                 "last_message": last_preview,
-                "created_at": conv.created_at.isoformat() if conv.created_at else "",
-                "updated_at": conv.updated_at.isoformat() if conv.updated_at else "",
+                "created_at": format_dt(conv.created_at),
+                "updated_at": format_dt(conv.updated_at),
             })
 
         logger.debug(f"查询会话列表 | count={len(result)} | first_user_message={result[0].get('first_user_message') if result else 'N/A'}")
@@ -171,7 +172,7 @@ class HistoryService(BaseService):
                 "id": msg.id,
                 "role": msg.role,
                 "content": msg.content,
-                "created_at": msg.created_at.isoformat() if msg.created_at else "",
+                "created_at": format_dt(msg.created_at),
             }
             for msg in messages
         ]
@@ -180,8 +181,8 @@ class HistoryService(BaseService):
             "id": conv.id,
             "title": conv.title,
             "messages": message_items,
-            "created_at": conv.created_at.isoformat() if conv.created_at else "",
-            "updated_at": conv.updated_at.isoformat() if conv.updated_at else "",
+            "created_at": format_dt(conv.created_at),
+            "updated_at": format_dt(conv.updated_at),
         }
 
     def delete_conversation(self, conversation_id: str) -> bool:
