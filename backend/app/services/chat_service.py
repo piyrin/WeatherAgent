@@ -44,6 +44,7 @@ from app.schemas.chat import (
     ToolCallRecord,
 )
 from app.services.base_service import BaseService
+from app.utils.datetime import format_dt
 from app.utils.logger import logger
 
 
@@ -312,7 +313,7 @@ class ChatService(BaseService):
             message=agent_result.answer,
             agent_process=agent_process,
             message_id=assistant_msg.id,
-            created_at=assistant_msg.created_at.isoformat()
+            created_at=format_dt(assistant_msg.created_at)
             if assistant_msg.created_at
             else None,
         )

@@ -119,7 +119,13 @@ function getDisplayTitle(conv) {
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
+  // 防御：若时间字符串无时区标识（后端 SQLite 读出的 naive datetime），
+  // 视为 UTC 并补 'Z'，避免被 new Date() 当作本地时间解析导致偏移 8 小时
+  if (!/[zZ]$|[+-]\d{2}:?\d{2}$/.test(dateStr)) {
+    dateStr = dateStr + 'Z'
+  }
   const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return ''
   const now = new Date()
   const diffMs = now - d
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
