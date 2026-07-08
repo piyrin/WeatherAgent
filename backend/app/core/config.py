@@ -180,26 +180,21 @@ class Settings(BaseSettings):
         description="地图/路线服务提供商（当前: amap，预留: tencent / baidu）",
     )
 
-    # ---- 向后兼容别名（已废弃，请直接用 AMAP_API_KEY） ----
 
     @property
     def WEATHER_API_KEY(self) -> str:
-        """【已废弃】请使用 AMAP_API_KEY"""
         return self.AMAP_API_KEY
 
     @property
     def MAP_API_KEY(self) -> str:
-        """【已废弃】请使用 AMAP_API_KEY"""
         return self.AMAP_API_KEY
 
     @property
     def WEATHER_BASE_URL(self) -> str:
-        """【已废弃】请使用 AMAP_BASE_URL"""
         return self.AMAP_BASE_URL
 
     @property
     def MAP_BASE_URL(self) -> str:
-        """【已废弃】请使用 AMAP_BASE_URL"""
         return self.AMAP_BASE_URL
 
     # ---- Provider API Key 扩展点 ----
