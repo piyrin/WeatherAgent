@@ -41,6 +41,19 @@ class DateParserTool(BaseTool):
         4: "星期五", 5: "星期六", 6: "星期日",
     }
 
+    # 时段词（用户说"明天中午""后天上午"时，剥离时段词后解析日期部分）
+    _TIME_PERIODS = [
+        "凌晨", "早晨", "清晨", "早上", "上午",
+        "中午", "午后", "下午", "傍晚", "晚上",
+        "晚间", "夜间", "夜里", "半夜",
+    ]
+
+    # 具体时间匹配（X点/X点X分/X点半/X:XX，支持中文数字"两""十"等）
+    _TIME_PATTERN = re.compile(
+        r"[零一二两三四五六七八九十\d]{1,3}\s*[点时：:]\s*"
+        r"[零一二两三四五六七八九十\d]{0,2}\s*(?:分)?(?:半)?"
+    )
+
     @property
     def name(self) -> str:
         return "date_parser"
@@ -49,7 +62,8 @@ class DateParserTool(BaseTool):
     def description(self) -> str:
         return (
             "将自然语言描述的日期转换为标准日期格式（YYYY-MM-DD）。"
-            "支持：今天、明天、后天、下周X、X天后、MM月DD日、YYYY-MM-DD。"
+            "支持：今天、明天、后天、下周X、X天后、MM月DD日、YYYY-MM-DD，"
+            "可附带时段词（如'明天中午''后天上午''下周三晚上'），时段会作为附加信息返回。"
             "参数：date_text（自然语言日期描述，必填）"
         )
 
@@ -81,7 +95,10 @@ class DateParserTool(BaseTool):
         today = datetime.now()
 
         try:
-            parsed_date = self._parse(today, date_text)
+            # 先提取时段词（如"中午""上午"），剥离后用日期部分走解析
+            date_part, time_period = self._extract_time_period(date_text)
+
+            parsed_date = self._parse(today, date_part)
             weekday_str = self._WEEKDAY_CN[parsed_date.weekday()]
             date_iso = parsed_date.strftime("%Y-%m-%d")
 
@@ -95,9 +112,12 @@ class DateParserTool(BaseTool):
                 "days_from_today": (parsed_date - today.replace(
                     hour=0, minute=0, second=0, microsecond=0
                 )).days,
+                "time_period": time_period,  # 时段词（如"中午"），可能为空
             }
 
             summary = f"'{date_text}' 解析为 {date_iso}（{weekday_str}）"
+            if time_period:
+                summary += f"，时段：{time_period}（天气API仅支持全天预报，将返回全天天气）"
 
             return {
                 "success": True,
@@ -113,6 +133,35 @@ class DateParserTool(BaseTool):
                 "error": str(exc),
                 "summary": f"无法解析日期 '{date_text}': {str(exc)}",
             }
+
+    def _extract_time_period(self, text: str) -> tuple[str, str]:
+        """
+        从日期文本中提取时段词和具体时间，返回 (剥离后的纯日期文本, 时段描述)
+
+        例如 "明天中午" → ("明天", "中午")
+             "今天下午两点" → ("今天", "下午两点")
+             "后天上午9点半" → ("后天", "上午9点半")
+             "7月9日下午3点" → ("7月9日", "下午3点")
+             "明天" → ("明天", "")
+        """
+        text = text.strip()
+        time_period = ""
+
+        # 1. 提取时段词
+        for period in self._TIME_PERIODS:
+            if period in text:
+                time_period = period
+                text = text.replace(period, "").strip()
+                break
+
+        # 2. 剥离具体时间表达（X点/X点X分/X点半/X:XX，支持中文数字）
+        time_match = self._TIME_PATTERN.search(text)
+        if time_match:
+            time_str = time_match.group()
+            time_period = (time_period + time_str).strip() if time_period else time_str
+            text = (text[:time_match.start()] + text[time_match.end():]).strip()
+
+        return text, time_period
 
     def _parse(self, today: datetime, text: str) -> datetime:
         """
@@ -201,7 +250,8 @@ class DateParserTool(BaseTool):
         # ---- 无法解析 ----
         raise ValueError(
             f"无法识别的日期表达: '{text}'。"
-            f"支持：今天、明天、后天、下周X、N天后、MM月DD日、YYYY-MM-DD。"
+            f"支持：今天、明天、后天、下周X、N天后、MM月DD日、YYYY-MM-DD，"
+            f"可附带时段词（如'明天中午''后天上午''下周三晚上'）。"
         )
 
     def _parse_weekday(self, s: str) -> int:

@@ -26,6 +26,7 @@
         :content="msg.content"
         :timestamp="msg.timestamp"
         :is-streaming="msg.isStreaming || false"
+        :route-data="msg.routeData || null"
       />
       <div ref="scrollAnchor"></div>
     </div>

@@ -144,6 +144,83 @@ def _normalize_weather_plan(plan_steps: list[dict], user_message: str) -> list[d
     return plan_steps
 
 
+def _normalize_route_weather(plan_steps: list[dict], user_message: str) -> list[dict]:
+    """
+    确定性修正：如果规划了路径规划（route_planner）但没有天气查询（weather），
+    自动在 answer 步骤前补充 weather 步骤。
+
+    出行场景下天气是重要参考，planner LLM 可能漏掉，这里兜底确保 weather 被调用。
+    adcode 从 geocoding 或 city_resolver 的输出引用（$step_N.adcode）。
+    """
+    tool_steps = [s for s in plan_steps if s.get("action") == "call_tool"]
+    has_route = any(s.get("tool_name") == "route_planner" for s in tool_steps)
+    has_weather = any(s.get("tool_name") == "weather" for s in tool_steps)
+
+    if not has_route or has_weather:
+        return plan_steps  # 无路线或已有天气，不处理
+
+    # 找 adcode 来源：优先 geocoding，其次 city_resolver
+    adcode_source = None
+    adcode_depends = []
+    for s in tool_steps:
+        if s.get("tool_name") == "geocoding":
+            adcode_source = f"$step_{s['step_id']}.adcode"
+            adcode_depends.append(s["step_id"])
+            break
+    if not adcode_source:
+        for s in tool_steps:
+            if s.get("tool_name") == "city_resolver":
+                adcode_source = f"$step_{s['step_id']}.adcode"
+                adcode_depends.append(s["step_id"])
+                break
+
+    if not adcode_source:
+        logger.warning(
+            "[planner] 路线规划存在但无 geocoding/city_resolver 提供 adcode，跳过 weather 补充"
+        )
+        return plan_steps
+
+    # 找 date_parser（可选，提供 date）
+    date_source = None
+    date_depends = []
+    for s in tool_steps:
+        if s.get("tool_name") == "date_parser":
+            date_source = f"$step_{s['step_id']}.date"
+            date_depends.append(s["step_id"])
+            break
+
+    # 构建 weather 步骤
+    weather_input = {"adcode": adcode_source}
+    if date_source:
+        weather_input["date"] = date_source
+
+    depends_on = list(set(adcode_depends + date_depends))
+    max_step_id = max((s.get("step_id", 0) for s in plan_steps), default=0)
+    weather_step = {
+        "step_id": max_step_id + 1,
+        "action": "call_tool",
+        "tool_name": "weather",
+        "tool_input": weather_input,
+        "reason": "确定性补充：出行场景必须查询天气，结合路线给出建议",
+        "depends_on": depends_on,
+        "on_failure": "skip",
+    }
+
+    # 在 answer 步骤前插入
+    answer_index = next(
+        (i for i, s in enumerate(plan_steps) if s.get("action") == "answer"),
+        len(plan_steps),
+    )
+    plan_steps.insert(answer_index, weather_step)
+
+    logger.info(
+        f"[planner] 确定性补充 weather 步骤 | "
+        f"adcode={adcode_source} | date={date_source or '(今天)'} | "
+        f"插入位置={answer_index}"
+    )
+    return plan_steps
+
+
 def create_planner_node(llm: BaseChatModel):
     """
     创建 planner 节点函数（闭包注入 LLM）
@@ -201,6 +278,7 @@ def create_planner_node(llm: BaseChatModel):
                 raise ValueError("LLM 返回的计划为空或格式不正确")
 
             plan_steps = _normalize_weather_plan(plan_steps, state["user_message"])
+            plan_steps = _normalize_route_weather(plan_steps, state["user_message"])
 
             # 生成人类可读摘要
             summary_parts = []

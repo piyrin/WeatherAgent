@@ -153,6 +153,16 @@ async function handleSend(text) {
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg) lastMsg.isStreaming = false
 
+    // 提取路线数据，挂载到 assistant 消息上（用于地图卡片渲染）
+    // 注意：executor 存的 tool_output 已是 route_planner 的 result 字段（含 polyline），
+    // 不是整个 {success, result, ...} 外层结构，因此直接检测 polyline 并用 output 本身
+    const routeTool = (result.tools || []).find(
+      (t) => t.name === 'route_planner' && t.output && t.output.polyline
+    )
+    if (routeTool && lastMsg && lastMsg.role === 'assistant') {
+      lastMsg.routeData = routeTool.output
+    }
+
   } catch (error) {
     console.error('发送消息失败：', error)
     updateLastMessage('抱歉，请求失败，请检查后端服务是否正常运行。')
