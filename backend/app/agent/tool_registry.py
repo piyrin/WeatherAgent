@@ -27,6 +27,8 @@ from app.tools.date_parser import DateParserTool
 from app.tools.route_planner import RoutePlannerTool
 from app.tools.calculator import CalculatorTool
 from app.tools.city_resolver import CityResolverTool
+from app.tools.ip_location import IPLocationTool
+from app.tools.geocoding import GeocodingTool
 from app.utils.logger import logger
 
 
@@ -142,6 +144,9 @@ def _register_all():
     tool_registry.register(CityResolverTool())
     tool_registry.register(RoutePlannerTool())
     tool_registry.register(CalculatorTool())
+    # 路径规划前置依赖工具
+    tool_registry.register(IPLocationTool())
+    tool_registry.register(GeocodingTool())
 
     logger.info(f"工具注册完成 | 共 {tool_registry.size()} 个工具 | {tool_registry.get_tool_names()}")
 
