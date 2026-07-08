@@ -116,7 +116,7 @@ class HistoryService(BaseService):
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else "",
             })
 
-        logger.debug(f"查询会话列表 | count={len(result)}")
+        logger.debug(f"查询会话列表 | count={len(result)} | first_user_message={result[0].get('first_user_message') if result else 'N/A'}")
         return result
 
     def get_total_conversations(self) -> int:

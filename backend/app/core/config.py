@@ -170,6 +170,24 @@ class Settings(BaseSettings):
         """高德天气 API 完整 URL（基于 AMAP_BASE_URL 拼接）"""
         return f"{self.AMAP_BASE_URL}/v3/weather/weatherInfo"
 
+    def amap_direction_url(self, mode: str = "driving") -> str:
+        """
+        高德路径规划 API 完整 URL（基于 AMAP_BASE_URL 拼接）
+
+        参数：
+            mode: 出行方式
+                driving  → /v3/direction/driving
+                transit  → /v3/direction/transit/integrated（公交/地铁换乘）
+                walking  → /v3/direction/walking
+        """
+        path_map = {
+            "driving": "driving",
+            "transit": "transit/integrated",
+            "walking": "walking",
+        }
+        path = path_map.get(mode, "driving")
+        return f"{self.AMAP_BASE_URL}/v3/direction/{path}"
+
     WEATHER_PROVIDER: str = Field(
         default="amap",
         description="天气数据提供商（当前: amap，预留: openweathermap）",

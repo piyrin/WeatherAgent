@@ -69,7 +69,11 @@ export async function sendMessage(message, conversationId = null) {
 }
 
 function normalizeChatResponse(response) {
-  const payload = response?.data || response || {}
+  // 兼容：后端返回 {code, message, data}（标准响应包装），而 mock 直接返回 {answer, steps, tools}
+  let payload = response || {}
+  if (payload.code && payload.data) {
+    payload = payload.data
+  }
   const agentProcess = payload.agent_process || {}
 
   return {

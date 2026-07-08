@@ -31,3 +31,14 @@ venv/
 *.njsproj
 *.sln
 *.sw?
+
+# AI 工具配置（与项目本身无关）
+.claude/
+.workbuddy/
+
+# 临时导出的 HTML 文件（仅根目录，不影响 frontend/index.html）
+/*.html
+
+# 系统额外文件
+Thumbs.db
+Desktop.ini

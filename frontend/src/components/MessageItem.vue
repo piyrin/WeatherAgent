@@ -15,12 +15,14 @@
         <span v-if="timestamp" class="message-time">{{ formatTime(timestamp) }}</span>
       </div>
       <div class="message-content" v-html="renderedContent"></div>
+      <MapCard v-if="routeData" :route-data="routeData" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import MapCard from './MapCard.vue'
 
 const props = defineProps({
   role: {
@@ -39,6 +41,10 @@ const props = defineProps({
   isStreaming: {
     type: Boolean,
     default: false
+  },
+  routeData: {
+    type: Object,
+    default: null
   }
 })
 

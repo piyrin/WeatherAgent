@@ -93,6 +93,15 @@ class AgentState(TypedDict):
     写入次数：1 次
     """
 
+    client_ip: str
+    """
+    客户端 IP 地址（从 HTTP 请求中提取）
+    写入者：AgentExecutor（从 ChatService 传入）
+    读取者：executor_node（注入 ip_location 工具调用）
+    用途：ip_location 工具定位用户当前位置
+    示例："114.247.50.2"、"192.168.1.1"（局域网）
+    """
+
     chat_history: str
     """
     对话历史的文本摘要（非 LangChain 消息对象）

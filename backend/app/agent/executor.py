@@ -75,23 +75,6 @@ class AgentResult:
 
 class AgentExecutor:
     """
-    LangGraph Agent 执行器
-
-    用法：
-        executor = AgentExecutor()
-
-        # 推荐方式：ChatMemory 预格式化的上下文字符串
-        result = await executor.run(
-            user_input="明天北京天气怎么样？",
-            chat_history="[历史对话摘要]\n用户问了深圳天气...\n\n[最近对话]\n用户: 你好\n助手: 你好！",
-        )
-
-        # 兼容旧版：LangChain 消息列表
-        result = await executor.run(
-            user_input="明天北京天气怎么样？",
-            chat_history=[HumanMessage(...), AIMessage(...)],
-        )
-
     初始化：
         - 自动创建 LLM 和编译好的 Graph
         - 所有请求复用同一个 Graph 实例（Graph 本身无状态）
@@ -109,6 +92,7 @@ class AgentExecutor:
         self,
         user_input: str,
         chat_history: list | str | None = None,
+        client_ip: str = "",
     ) -> AgentResult:
         """
         执行 Agent 完整工作流
@@ -121,6 +105,9 @@ class AgentExecutor:
                           - list: LangChain HumanMessage/AIMessage 消息列表（兼容旧版调用）
                                   转换为纯文本后注入（只取最近 6 条）
                           - None: 无历史对话
+            client_ip:    客户端真实 IP 地址（从 HTTP 请求中提取）。
+                          用于 ip_location 工具定位用户当前位置。
+                          传入空字符串表示无法获取（如开发环境本地测试）。
 
         返回值：
             AgentResult：包含最终回答和执行过程
@@ -159,6 +146,7 @@ class AgentExecutor:
             # 输入层
             "user_message": user_input,
             "conversation_id": "",
+            "client_ip": client_ip or "",
             "chat_history": chat_history_text,
             "start_time": start_time,
             # 推理层（待填充）

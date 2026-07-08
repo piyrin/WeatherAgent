@@ -41,6 +41,12 @@ const config = {
   /** 是否输出 Debug 日志 */
   debug: import.meta.env.VITE_DEBUG === 'true',
 
+  // ---------- 高德地图 JSAPI（前端地图渲染）----------
+  /** 高德 JSAPI Key（与后端 WebService Key 不同，需在高德控制台单独申请「Web端 JS API」类型） */
+  amapJsapiKey: import.meta.env.VITE_AMAP_JSAPI_KEY || '',
+  /** 高德 JSAPI 安全密钥（控制台申请 Key 时配套生成） */
+  amapSecurityCode: import.meta.env.VITE_AMAP_SECURITY_CODE || '',
+
   // ---------- 超时 ----------
   /** 请求超时时间（毫秒） */
   timeout: 60000
